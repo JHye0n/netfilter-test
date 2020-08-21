@@ -9,6 +9,9 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <string.h>
+
+static int status = 0;
 
 struct ip *iphdr;
 struct tcphdr *tcp_hdr;
@@ -32,7 +35,7 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 	u_int32_t mark,ifi;
 	int ret;
 	unsigned char *data;
-	unsigned char *httphdr;
+	u_char *httphdr;
 
 	// printf delete
 
@@ -57,16 +60,18 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 
 
 	if (ret >= 0)
+		printf("payload_len=%d\n ", ret);
 		iphdr = (struct ip *) data;
 		if(iphdr->ip_p == IPPROTO_TCP){
 			printf("ip header len : %d\n", iphdr->ip_hl);
 			tcp_hdr = (struct tcphdr *) (data + sizeof(ip));
+			printf("sport : %d\n", ntohs(tcp_hdr->th_sport));
 			printf("dport : %d\n", ntohs(tcp_hdr->th_dport));
-			if(ntohs(tcp_hdr->th_dport == 80)){
-				httphdr = (data + sizeof(ip) + sizeof(tcphdr));
+
+			// http port check routine
+			if(ntohs(tcp_hdr->th_dport) == 80){
+				httphdr = data + sizeof(ip) + sizeof(tcphdr);
 				printf("%s\n",httphdr);
-				//printf("payload_len=%d ", ret);
-				//dump(data, ret);
 			}
 		}
 
@@ -81,11 +86,21 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 {
 	u_int32_t id = print_pkt(nfa);
 	printf("entering callback\n");
-		return nfq_set_verdict(qh, id, NF_DROP, 0, NULL); /** ACCEPT, DROP **/
+	if(status == 0){
+		return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL); /** ACCEPT, DROP **/
+	}else if(status == 1){
+		return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL); /** ACCEPT, DROP **/
+	}
 }
 
 int main(int argc, char **argv)
 {
+
+	if(argc < 2){
+		printf("usage : sudo %s <host-domain>\n",argv[0]);
+		return 0;
+	}
+
 	struct nfq_handle *h;
 	struct nfq_q_handle *qh;
 	struct nfnl_handle *nh;
@@ -114,7 +129,7 @@ int main(int argc, char **argv)
 	}
 
 	printf("binding this socket to queue '0'\n");
-	qh = nfq_create_queue(h,  0, &cb, NULL);
+	qh = nfq_create_queue(h,  0, &cb, NULL); // packet -> callback
 	if (!qh) {
 		fprintf(stderr, "error during nfq_create_queue()\n");
 		exit(1);
