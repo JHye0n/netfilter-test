@@ -103,11 +103,12 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 {
 	u_int32_t id = print_pkt(nfa, host);
 	printf("entering callback\n");
-	if(status == 0){
-		return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL); /** ACCEPT, DROP **/
-	}else if(status == 1){
-		return nfq_set_verdict(qh, id, NF_DROP, 0, NULL); /** ACCEPT, DROP **/
-	}
+	return nfq_set_verdict(qh, id, status==0 ? NF_ACCEPT : NF_DROP, 0, NULL);
+	//if(status == 0){
+		//return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL); /** ACCEPT, DROP **/
+	//}else if(status == 1){
+		//return nfq_set_verdict(qh, id, NF_DROP, 0, NULL); /** ACCEPT, DROP **/
+	//}
 }
 
 int main(int argc, char **argv)
