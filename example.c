@@ -5,92 +5,58 @@
 #include <linux/types.h>
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <errno.h>
+
 #include <libnetfilter_queue/libnetfilter_queue.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <string.h>
-
-//variable call
-int status = 0;
-char* host;
-
-struct ip *iphdr;
-struct tcphdr *tcp_hdr;
-
-void dump(unsigned char* buf, int size) {
-	int i;
-	for (i = 0; i < size; i++) {
-		if (i % 16 == 0)
-			printf("\n");
-		printf("%02x ", buf[i]);
-	}
-}
 
 /* returns packet id */
-static u_int32_t print_pkt (struct nfq_data *tb, char* host)
+static u_int32_t print_pkt (struct nfq_data *tb)
 {
 	int id = 0;
 	struct nfqnl_msg_packet_hdr *ph;
 	struct nfqnl_msg_packet_hw *hwph;
-	struct ethernet_hdr *eth_hdr;
 	u_int32_t mark,ifi;
 	int ret;
 	unsigned char *data;
-	unsigned char *httphdr;
-	char* httppacket;
-
-	// printf delete
 
 	ph = nfq_get_msg_packet_hdr(tb);
 	if (ph) {
 		id = ntohl(ph->packet_id);
+		printf("hw_protocol=0x%04x hook=%u id=%u ",
+			ntohs(ph->hw_protocol), ph->hook, id);
 	}
 
 	hwph = nfq_get_packet_hw(tb);
+	if (hwph) {
+		int i, hlen = ntohs(hwph->hw_addrlen);
+
+		printf("hw_src_addr=");
+		for (i = 0; i < hlen-1; i++)
+			printf("%02x:", hwph->hw_addr[i]);
+		printf("%02x ", hwph->hw_addr[hlen-1]);
+	}
 
 	mark = nfq_get_nfmark(tb);
+	if (mark)
+		printf("mark=%u ", mark);
 
 	ifi = nfq_get_indev(tb);
+	if (ifi)
+		printf("indev=%u ", ifi);
 
 	ifi = nfq_get_outdev(tb);
-
+	if (ifi)
+		printf("outdev=%u ", ifi);
 	ifi = nfq_get_physindev(tb);
+	if (ifi)
+		printf("physindev=%u ", ifi);
 
 	ifi = nfq_get_physoutdev(tb);
+	if (ifi)
+		printf("physoutdev=%u ", ifi);
 
 	ret = nfq_get_payload(tb, &data);
-
-
 	if (ret >= 0)
-		printf("payload_len=%d\n ", ret);
-		iphdr = (struct ip *) data; // iphdr
-		if(iphdr->ip_p == IPPROTO_TCP){ // tcp packet check
-			tcp_hdr = (struct tcphdr *) (data + sizeof(ip)); // tcphdr
-
-			// http port check routine
-			if(ntohs(tcp_hdr->th_dport) == 80){
-				httphdr = data + sizeof(ip) + sizeof(tcphdr); // http packet
-				//printf("%s\n",httphdr); // print packet
-
-				httppacket = (char *)httphdr;
-
-				if(strstr(httppacket, host)){ //strstr string check(argv[1])
-					printf("blocked!!!");
-					status = 1;
-				}else{
-					status = 0;
-					printf("ip header len : %d\n", iphdr->ip_hl); //iphdr length
-					printf("sport : %d\n", ntohs(tcp_hdr->th_sport)); // tcphdr(src port)
-                          		printf("dport : %d\n", ntohs(tcp_hdr->th_dport)); // tcphdr(dst port)
-					printf("%s\n", httppacket);
-				}
-				
-			
-				}
-
-			
-
-			}
+		printf("payload_len=%d ", ret);
 
 	fputc('\n', stdout);
 
@@ -101,34 +67,19 @@ static u_int32_t print_pkt (struct nfq_data *tb, char* host)
 static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 	      struct nfq_data *nfa, void *data)
 {
-	u_int32_t id = print_pkt(nfa, host);
+	u_int32_t id = print_pkt(nfa);
 	printf("entering callback\n");
-	if(status == 0){
-		return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL); /** ACCEPT, DROP **/
-	}else if(status == 1){
-		return nfq_set_verdict(qh, id, NF_DROP, 0, NULL); /** ACCEPT, DROP **/
-	}
+	return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
 }
 
 int main(int argc, char **argv)
 {
-
-	if(argc < 2){
-		printf("usage : sudo %s <host-domain>\n",argv[0]);
-		return 0;
-	}
-
 	struct nfq_handle *h;
 	struct nfq_q_handle *qh;
 	struct nfnl_handle *nh;
-	struct ethernet_hdr *eth_hdr;
 	int fd;
 	int rv;
 	char buf[4096] __attribute__ ((aligned));
-
-	host = argv[1];
-
-	printf("host domain : %s\n", host);
 
 	printf("opening library handle\n");
 	h = nfq_open();
@@ -150,7 +101,7 @@ int main(int argc, char **argv)
 	}
 
 	printf("binding this socket to queue '0'\n");
-	qh = nfq_create_queue(h,  0, &cb, NULL); // packet -> callback
+	qh = nfq_create_queue(h,  0, &cb, NULL);
 	if (!qh) {
 		fprintf(stderr, "error during nfq_create_queue()\n");
 		exit(1);
